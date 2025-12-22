@@ -1,0 +1,123 @@
+name: Release RAM OS
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup environment
+        id: setup
+        run: |
+          # Extract version from tag
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "VERSION=${VERSION}" >> $GITHUB_ENV
+          
+          # Get previous tag for changelog
+          PREV_TAG=$(git describe --tags --abbrev=0 ${{ github.ref_name }}^ 2>/dev/null || echo "initial")
+          echo "prev_tag=${PREV_TAG}" >> $GITHUB_OUTPUT
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            busybox-static \
+            dropbear-bin \
+            kexec-tools \
+            zstd \
+            zfsutils-linux \
+            debootstrap \
+            gdisk \
+            parted \
+            dosfstools \
+            e2fsprogs \
+            whiptail \
+            gcc \
+            libc6-dev \
+            curl \
+            wget \
+            rsync \
+            cpio
+
+      - name: Build RAM OS bundle
+        run: |
+          sudo ./create-ram-os.sh
+          
+          # Copy artifact to workspace
+          sudo cp /tmp/zfs-ram-boot.sh ./zfs-ram-boot-${{ env.VERSION }}.sh
+          sudo chown $USER:$USER ./zfs-ram-boot-${{ env.VERSION }}.sh
+
+      - name: Generate changelog
+        id: changelog
+        uses: actions/github-script@v6
+        with:
+          script: |
+            try {
+              const comparison = await github.rest.repos.compareCommits({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                base: '${{ steps.setup.outputs.prev_tag }}',
+                head: context.ref
+              });
+
+              const commits = comparison.data.commits
+                .map(c => `- ${c.commit.message.split('\n')[0]}`)
+                .join('\n');
+
+              core.exportVariable('CHANGELOG_CONTENT', commits || 'No changes found');
+            } catch (error) {
+              core.exportVariable('CHANGELOG_CONTENT', 'Initial release');
+              core.warning(error.message);
+            }
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: RAM OS ${{ env.VERSION }}
+          body: |
+            ## 🚀 RAM OS Release ${{ env.VERSION }}
+
+            A self-contained RAM-based operating system for ZFS installation and server rescue operations.
+
+            ### 📦 Download
+
+            Download `zfs-ram-boot-${{ env.VERSION }}.sh` from the assets below.
+
+            ### 🛠️ Usage
+
+            ```bash
+            # Upload to your server
+            scp zfs-ram-boot-${{ env.VERSION }}.sh root@server:/tmp/
+
+            # SSH and execute
+            ssh root@server
+            chmod +x /tmp/zfs-ram-boot-*.sh
+            /tmp/zfs-ram-boot-*.sh
+            ```
+
+            ### 📋 Changes
+            ${{ env.CHANGELOG_CONTENT }}
+
+            ### 🔍 Full Changes
+            [Compare with previous version](https://github.com/${{ github.repository }}/compare/${{ steps.setup.outputs.prev_tag }}...${{ github.ref_name }})
+          draft: false
+          prerelease: false
+          files: |
+            zfs-ram-boot-${{ env.VERSION }}.sh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
