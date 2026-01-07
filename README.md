@@ -199,7 +199,7 @@ ram_os/
 
 MIT License - see [LICENSE](LICENSE) file.
 
-Copyright (c) 2024 Andrey Prokopenko <job@terem.fr>
+Copyright (c) 2026 Andrey Prokopenko <job@terem.fr>
 
 ## 🙏 Acknowledgments
 
